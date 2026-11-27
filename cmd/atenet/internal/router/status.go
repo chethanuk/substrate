@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"go.ate.dev/substrate/cmd/atenet/internal/router/extproc"
 	"go.ate.dev/substrate/cmd/atenet/internal/router/ingress"
@@ -75,28 +74,27 @@ func (c routerConfig) listenStatus() (net.Listener, error) {
 	return lis, nil
 }
 
-func (s *RouterServer) getRouterIP(ctx context.Context) string {
+// getRouterIP reads the Service ClusterIP from the env var the kubelet injects
+// for Services in the pod's own namespace (not cfg.Namespace). The router's
+// RBAC does not grant Services get, so an API lookup would always fail.
+// The var is set once at pod start, only if the Service already existed and
+// enableServiceLinks is not false, so "Unavailable" (or a stale IP after a
+// Service recreate) is possible.
+func (s *RouterServer) getRouterIP(_ context.Context) string {
 	if s.clientset == nil {
 		return "Offline Mode (No Cluster IP)"
 	}
 
-	svc, err := s.clientset.CoreV1().Services(s.cfg.Namespace).Get(ctx, s.cfg.RouterServiceName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Sprintf("Lookup Failed: %v", err)
+	// The kubelet names the var after the Service: upper case, dashes to underscores.
+	env := strings.ToUpper(strings.ReplaceAll(s.cfg.RouterServiceName, "-", "_")) + "_SERVICE_HOST"
+	if ip := os.Getenv(env); ip != "" {
+		return ip
 	}
-
-	if svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == "None" {
-		return "ClusterIP Unassigned"
-	}
-
-	return svc.Spec.ClusterIP
+	return "Unavailable"
 }
 
 func (s *RouterServer) handleStatusz(w http.ResponseWriter, req *http.Request) {
-	ctx, cancel := context.WithTimeout(req.Context(), 3*time.Second)
-	defer cancel()
-
-	routerIP := s.getRouterIP(ctx)
+	routerIP := s.getRouterIP(req.Context())
 
 	buildInfo := BuildTag
 	if info, ok := debug.ReadBuildInfo(); ok {

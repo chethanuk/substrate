@@ -35,6 +35,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"go.ate.dev/substrate/cmd/atenet/internal/router/extproc"
 	"go.ate.dev/substrate/cmd/atenet/internal/router/ingress"
@@ -179,6 +180,40 @@ func TestStatuszEndpoint(t *testing.T) {
 	}
 	if dashboard.Parking.MaxParked != ingress.DefaultParkedRequestMax {
 		t.Errorf("expected parking max_parked %d, got %d", ingress.DefaultParkedRequestMax, dashboard.Parking.MaxParked)
+	}
+}
+
+// The router SA cannot read Services, so the IP must come from the
+// kubelet-injected env var rather than an API lookup.
+func TestGetRouterIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		svcName string
+		envKey  string
+		envVal  string
+		want    string
+	}{
+		{name: "env var set", svcName: "atenet-router", envKey: "ATENET_ROUTER_SERVICE_HOST", envVal: "10.96.0.42", want: "10.96.0.42"},
+		{name: "env var unset", svcName: "atenet-router", want: "Unavailable"},
+		{name: "custom service name", svcName: "my-router", envKey: "MY_ROUTER_SERVICE_HOST", envVal: "10.96.0.7", want: "10.96.0.7"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, k := range []string{"ATENET_ROUTER_SERVICE_HOST", "MY_ROUTER_SERVICE_HOST"} {
+				t.Setenv(k, "") // restores the original value on cleanup
+				os.Unsetenv(k)
+			}
+			if tc.envKey != "" {
+				t.Setenv(tc.envKey, tc.envVal)
+			}
+			s := &RouterServer{
+				cfg:       routerConfig{Namespace: "default", RouterServiceName: tc.svcName},
+				clientset: fake.NewSimpleClientset(), // no Service, like a forbidden lookup
+			}
+			if got := s.getRouterIP(context.Background()); got != tc.want {
+				t.Errorf("getRouterIP() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
