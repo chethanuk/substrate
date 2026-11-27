@@ -19,6 +19,16 @@ import (
 	"testing"
 )
 
+// setNoColor sets both NoColor and the cached NO_COLOR value so the result
+// does not depend on the environment the tests run in, and restores them
+// when the test ends.
+func setNoColor(t *testing.T, v bool) {
+	t.Helper()
+	origNoColor, origEnvNoColor := NoColor, envNoColor
+	t.Cleanup(func() { NoColor, envNoColor = origNoColor, origEnvNoColor })
+	NoColor, envNoColor = v, false
+}
+
 func TestColorf(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -98,8 +108,7 @@ func TestColorf(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			NoColor = tc.noColor
-			defer func() { NoColor = false }()
+			setNoColor(t, tc.noColor)
 
 			got := Colorf(tc.format, tc.args...)
 			if got != tc.want {
@@ -112,7 +121,7 @@ func TestColorf(t *testing.T) {
 func TestFColorfAndFColorfln(t *testing.T) {
 	t.Run("FColorf", func(t *testing.T) {
 		var buf bytes.Buffer
-		NoColor = false
+		setNoColor(t, false)
 		err := FColorf(&buf, "Hello <green>%s</green>", "world")
 		if err != nil {
 			t.Fatalf("FColorf failed: %v", err)
@@ -125,7 +134,7 @@ func TestFColorfAndFColorfln(t *testing.T) {
 
 	t.Run("FColorfln", func(t *testing.T) {
 		var buf bytes.Buffer
-		NoColor = false
+		setNoColor(t, false)
 		err := FColorfln(&buf, "Hello <green>%s</green>", "world")
 		if err != nil {
 			t.Fatalf("FColorfln failed: %v", err)
@@ -138,8 +147,7 @@ func TestFColorfAndFColorfln(t *testing.T) {
 
 	t.Run("FColorf no color", func(t *testing.T) {
 		var buf bytes.Buffer
-		NoColor = true
-		defer func() { NoColor = false }()
+		setNoColor(t, true)
 		err := FColorf(&buf, "Hello <green>%s</green>", "world")
 		if err != nil {
 			t.Fatalf("FColorf failed: %v", err)
@@ -191,8 +199,7 @@ func TestColorWriter(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			NoColor = tc.noColor
-			defer func() { NoColor = false }()
+			setNoColor(t, tc.noColor)
 
 			var buf bytes.Buffer
 			cw := &ColorWriter{W: &buf, ANSI: tc.ansi}
@@ -280,8 +287,7 @@ func TestIndentAndColorChaining(t *testing.T) {
 	cyanWriter := &ColorWriter{W: &buf, ANSI: "\033[36m"}
 	iw := NewIndentWriter(cyanWriter, "        ")
 
-	NoColor = false
-	defer func() { NoColor = false }()
+	setNoColor(t, false)
 
 	_, err := iw.Write([]byte("hello\nworld\n"))
 	if err != nil {
